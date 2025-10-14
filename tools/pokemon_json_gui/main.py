@@ -6,7 +6,7 @@ import sys
 import traceback
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Set, Tuple
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
@@ -29,6 +29,7 @@ if __package__:
         normalize_natdex_constant,
         normalize_species_constant,
         showdown_folder_from_species,
+        load_species_family_mapping,
     )
     from .data_models import EvolutionEntry, LearnsetEntry, PokemonData
     from .database import PokemonDatabase, PokemonRecord
@@ -68,6 +69,7 @@ else:  # pragma: no cover - executed when run as a script
         normalize_natdex_constant,
         normalize_species_constant,
         showdown_folder_from_species,
+        load_species_family_mapping,
     )
     from data_models import EvolutionEntry, LearnsetEntry, PokemonData  # type: ignore
     from database import PokemonDatabase, PokemonRecord  # type: ignore
@@ -196,6 +198,7 @@ class DatabaseBrowser(tk.Toplevel):
         self.transient(master)
         self.columnconfigure(0, weight=1)
         self.rowconfigure(0, weight=1)
+        self._record_sources: Dict[str, str] = {}
 
         columns = ("species", "display", "updated")
         self.tree = ttk.Treeview(self, columns=columns, show="headings", selectmode="browse")
@@ -215,15 +218,19 @@ class DatabaseBrowser(tk.Toplevel):
         button_frame.grid(row=1, column=0, columnspan=5, sticky="ew")
         button_frame.columnconfigure(0, weight=1)
         ttk.Button(button_frame, text="Refresh", command=self.refresh).grid(row=0, column=0, sticky="w")
-        ttk.Button(button_frame, text="Load into Form", command=self._load_selected).grid(row=0, column=1, sticky="e", padx=(8, 0))
-        ttk.Button(button_frame, text="Apply to Project", command=self._apply_selected).grid(row=0, column=2, sticky="e", padx=(8, 0))
+        self.load_button = ttk.Button(button_frame, text="Load into Form", command=self._load_selected)
+        self.load_button.grid(row=0, column=1, sticky="e", padx=(8, 0))
+        self.apply_button = ttk.Button(button_frame, text="Apply to Project", command=self._apply_selected)
+        self.apply_button.grid(row=0, column=2, sticky="e", padx=(8, 0))
         ttk.Button(button_frame, text="Close", command=self.destroy).grid(row=0, column=3, sticky="e", padx=(8, 0))
 
         self.grab_set()
+        self.tree.bind("<<TreeviewSelect>>", self._update_button_states)
         self.refresh()
 
     # ------------------------------------------------------------------
     def refresh(self) -> None:
+        self._record_sources.clear()
         for item in self.tree.get_children():
             self.tree.delete(item)
         enabled_families = set(load_enabled_family_macros())
@@ -238,9 +245,52 @@ class DatabaseBrowser(tk.Toplevel):
                 tk.END,
                 values=(record.species_constant, record.display_name, record.updated_at),
             )
+            self._record_sources[record.species_constant] = "database"
+
+        project_records = self._project_records(enabled_families, valid_species)
+        for record in project_records:
+            if record.species_constant in self._record_sources:
+                continue
+            self.tree.insert(
+                "",
+                tk.END,
+                values=(record.species_constant, record.display_name, record.updated_at),
+            )
+            self._record_sources[record.species_constant] = "project"
         if records:
             first = self.tree.get_children()[0]
             self.tree.selection_set(first)
+        elif project_records:
+            first = self.tree.get_children()[0]
+            self.tree.selection_set(first)
+        self._update_button_states()
+
+    # ------------------------------------------------------------------
+    def _project_records(
+        self,
+        enabled_families: Set[str],
+        valid_species: Set[str],
+    ) -> List[PokemonRecord]:
+        metadata = load_species_metadata()
+        family_mapping = load_species_family_mapping()
+        records: List[PokemonRecord] = []
+        for species, family in family_mapping.items():
+            if species not in valid_species:
+                continue
+            if family not in enabled_families:
+                continue
+            meta = metadata.get(species)
+            display = meta.display_name if meta else species
+            records.append(
+                PokemonRecord(
+                    species_constant=species,
+                    display_name=display,
+                    updated_at="Project Files",
+                    family_macro=family,
+                )
+            )
+        records.sort(key=lambda record: (record.display_name, record.species_constant))
+        return records
 
     # ------------------------------------------------------------------
     def _selected_species(self) -> Optional[str]:
@@ -251,10 +301,27 @@ class DatabaseBrowser(tk.Toplevel):
         return values[0] if values else None
 
     # ------------------------------------------------------------------
+    def _update_button_states(self, _event: Optional[tk.Event] = None) -> None:
+        species = self._selected_species()
+        is_database_entry = species is not None and self._record_sources.get(species) == "database"
+        if is_database_entry:
+            self.load_button.state(["!disabled"])
+            self.apply_button.state(["!disabled"])
+        else:
+            self.load_button.state(["disabled"])
+            self.apply_button.state(["disabled"])
+
+    # ------------------------------------------------------------------
     def _load_selected(self) -> None:
         species = self._selected_species()
         if not species:
             messagebox.showwarning("Database", "Select a Pokémon entry first.")
+            return
+        if self._record_sources.get(species) != "database":
+            messagebox.showinfo(
+                "Project entry",
+                "This Pokémon is already part of the project files and does not have a saved database entry.",
+            )
             return
         try:
             self.load_callback(species)
@@ -267,6 +334,12 @@ class DatabaseBrowser(tk.Toplevel):
         species = self._selected_species()
         if not species:
             messagebox.showwarning("Database", "Select a Pokémon entry first.")
+            return
+        if self._record_sources.get(species) != "database":
+            messagebox.showinfo(
+                "Project entry",
+                "This Pokémon is already part of the project files and does not have a saved database entry.",
+            )
             return
         try:
             self.apply_callback(species)
