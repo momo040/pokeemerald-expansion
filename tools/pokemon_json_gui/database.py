@@ -4,7 +4,7 @@ import json
 import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Iterable, List, Optional, Set, Tuple
 
 try:
     from . import project_paths
@@ -28,6 +28,7 @@ class PokemonRecord:
     species_constant: str
     display_name: str
     updated_at: str
+    family_macro: Optional[str] = None
 
 
 class PokemonDatabase:
@@ -76,23 +77,50 @@ class PokemonDatabase:
             )
 
     # ------------------------------------------------------------------
-    def list_entries(self) -> List[PokemonRecord]:
+    def list_entries(
+        self,
+        *,
+        enabled_families: Optional[Iterable[str]] = None,
+        valid_species: Optional[Set[str]] = None,
+    ) -> List[PokemonRecord]:
         with self._connect() as conn:
             cursor = conn.execute(
                 """
-                SELECT species_constant, display_name, updated_at
+                SELECT species_constant, display_name, payload, updated_at
                 FROM pokemon
                 ORDER BY updated_at DESC, species_constant ASC
                 """
             )
-            return [
-                PokemonRecord(
-                    species_constant=row["species_constant"],
-                    display_name=row["display_name"],
-                    updated_at=row["updated_at"],
+            records: List[PokemonRecord] = []
+            enabled_set = set(enabled_families) if enabled_families is not None else None
+            for row in cursor.fetchall():
+                species_constant = row["species_constant"]
+                if valid_species is not None and species_constant not in valid_species:
+                    continue
+
+                family_macro: Optional[str] = None
+                payload_text = row["payload"]
+                if payload_text:
+                    try:
+                        payload = json.loads(payload_text)
+                    except (TypeError, json.JSONDecodeError):  # pragma: no cover - defensive parsing
+                        payload = {}
+                    family_value = payload.get("family_macro")
+                    if isinstance(family_value, str) and family_value:
+                        family_macro = family_value.strip()
+
+                if enabled_set is not None and (not family_macro or family_macro not in enabled_set):
+                    continue
+
+                records.append(
+                    PokemonRecord(
+                        species_constant=species_constant,
+                        display_name=row["display_name"],
+                        updated_at=row["updated_at"],
+                        family_macro=family_macro,
+                    )
                 )
-                for row in cursor.fetchall()
-            ]
+            return records
 
     # ------------------------------------------------------------------
     def load_entry(self, species_constant: str) -> Tuple[PokemonData, AssetBundle]:
