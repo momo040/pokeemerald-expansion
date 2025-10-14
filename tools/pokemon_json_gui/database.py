@@ -109,7 +109,7 @@ class PokemonDatabase:
                     if isinstance(family_value, str) and family_value:
                         family_macro = family_value.strip()
 
-                if enabled_set is not None and (not family_macro or family_macro not in enabled_set):
+                if enabled_set is not None and family_macro is not None and family_macro not in enabled_set:
                     continue
 
                 records.append(
