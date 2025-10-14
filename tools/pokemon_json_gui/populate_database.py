@@ -85,6 +85,84 @@ def _collect_enabled_species() -> List[str]:
     return [species for species, family in mapping.items() if family in enabled_families]
 
 
+def _custom_species_source() -> Optional[str]:
+    species_path = project_paths.REPO_ROOT / "src" / "data" / "pokemon" / "species_info.h"
+    if not species_path.exists():
+        return None
+
+    text = species_path.read_text(encoding="utf-8")
+    marker = "/* You may add any custom species below this point"
+    marker_index = text.find(marker)
+    if marker_index == -1:
+        return None
+
+    decl_marker = "const struct SpeciesInfo gSpeciesInfo[]"
+    decl_index = text.find(decl_marker)
+    if decl_index == -1:
+        return None
+
+    start = text.find("*/", marker_index)
+    if start == -1:
+        return None
+    start += 2
+
+    length = len(text)
+    while True:
+        while start < length and text[start].isspace():
+            start += 1
+        if start < length and text.startswith("/*", start):
+            end_comment = text.find("*/", start)
+            if end_comment == -1:
+                return None
+            start = end_comment + 2
+            continue
+        break
+
+    end = text.rfind("};")
+    if end == -1 or end <= start:
+        return None
+
+    custom_section = text[start:end]
+    if not custom_section.strip():
+        return None
+
+    macro_section = text[:decl_index]
+    macro_lines = []
+    for line in macro_section.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("#include \"species_info/gen_"):
+            continue
+        macro_lines.append(line)
+    macro_section = "\n".join(macro_lines)
+
+    return (
+        f"{macro_section}\n"
+        "const struct SpeciesInfo gSpeciesInfo[] = {\n"
+        f"{custom_section}\n"
+        "};\n"
+    )
+
+
+def _load_custom_species_info(header: Path) -> Dict[str, Dict[str, str]]:
+    source = _custom_species_source()
+    if source is None:
+        return {}
+
+    with tempfile.NamedTemporaryFile("w", suffix=".h", encoding="utf-8", delete=False) as handle:
+        temp_path = Path(handle.name)
+        handle.write(source)
+
+    try:
+        text = _run_cpp(temp_path, header)
+    finally:
+        try:
+            temp_path.unlink()
+        except FileNotFoundError:  # pragma: no cover - cleanup best effort
+            pass
+
+    return _parse_species_info_text(text)
+
+
 def _pick_existing(base: Path, names: Iterable[str]) -> Optional[Path]:
     for name in names:
         candidate = base / name
@@ -763,6 +841,13 @@ def populate_database(database: PokemonDatabase) -> None:
         for path in sorted(project_paths.SPECIES_INFO_DIR.glob("*_families.h")):
             text = _run_cpp(path, header_path)
             species_info.update(_parse_species_info_text(text))
+
+        custom_species_info = _load_custom_species_info(header_path)
+        if custom_species_info:
+            species_info.update(custom_species_info)
+            for custom_species in custom_species_info:
+                if custom_species not in species_list:
+                    species_list.append(custom_species)
 
         level_up_learnsets = _parse_level_up_learnsets(header_path)
         egg_move_learnsets = _parse_move_learnsets(
