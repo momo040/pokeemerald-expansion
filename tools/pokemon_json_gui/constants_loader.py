@@ -24,6 +24,9 @@ SPECIES_NAME_RE = re.compile(r"\[\s*(SPECIES_[A-Z0-9_]+)\s*][^[]+?\.speciesName\
 HEIGHT_RE = re.compile(r"\.height\s*=\s*(\d+)")
 WEIGHT_RE = re.compile(r"\.weight\s*=\s*(\d+)")
 FAMILY_MACRO_RE = re.compile(r"#define\s+(P_FAMILY_[A-Z0-9_]+)\s+")
+FAMILY_IF_RE = re.compile(r"#if\s+(P_FAMILY_[A-Z0-9_]+)")
+FAMILY_ELIF_RE = re.compile(r"#elif\s+(P_FAMILY_[A-Z0-9_]+)")
+SPECIES_MARKER = "[SPECIES_"
 IDENTIFIER_RE = re.compile(r"[A-Z][A-Z0-9_]*")
 
 
@@ -112,6 +115,33 @@ def load_family_macros() -> List[str]:
             if match:
                 macros.append(match.group(1))
     return macros
+
+
+def load_species_family_mapping() -> Dict[str, str]:
+    mapping: Dict[str, str] = {}
+    for path in project_paths.SPECIES_INFO_DIR.glob("**/*.h"):
+        if not path.is_file():
+            continue
+        current_family: Optional[str] = None
+        for line in path.read_text(encoding="utf-8").splitlines():
+            stripped = line.strip()
+            family_match = FAMILY_IF_RE.match(stripped)
+            if family_match:
+                current_family = family_match.group(1)
+                continue
+            family_match = FAMILY_ELIF_RE.match(stripped)
+            if family_match:
+                current_family = family_match.group(1)
+                continue
+            if stripped.startswith("#endif") and "P_FAMILY_" in stripped:
+                current_family = None
+                continue
+            if current_family and stripped.startswith(SPECIES_MARKER):
+                end = stripped.find("]")
+                if end != -1:
+                    species_name = stripped[len("[") : end]
+                    mapping[species_name] = current_family
+    return mapping
 
 
 def _resolve_define(
