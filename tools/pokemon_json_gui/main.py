@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import argparse
+import json
+import sys
 import traceback
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List
+from typing import Callable, Dict, List, Optional
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
@@ -90,6 +93,60 @@ OPTIONAL_ASSETS = {
     "Footprint": ("footprint.png", ("PNG files", "*.png")),
     "Cry Sample (.aif)": ("cry_sample", ("AIFF", "*.aif")),
 }
+
+
+def generate_pokemon_assets(
+    data: PokemonData,
+    assets: AssetBundle,
+    logger: Optional[Callable[[str], None]] = None,
+) -> None:
+    def log(message: str) -> None:
+        if logger:
+            logger(message)
+
+    project_paths.ensure_directories()
+    log("Enabling family macro…")
+    update_family_toggle(data.family_macro)
+    log("Copying graphics and validating sprites…")
+    apply_graphics(data, assets)
+    log("Writing JSON payloads…")
+    save_json_payloads(data)
+    log("Updating dex order tables…")
+    update_pokedex_orders(data)
+    log("Refreshing cry tables…")
+    update_cry_tables(data.family_macro, data.cry)
+    if assets.cry_sample:
+        log("Copying cry sample…")
+        copy_cry_sample(assets.cry_sample, data.cry)
+    log("Generation complete.")
+
+
+def run_headless(config_path: Path, summary_output: Optional[Path]) -> None:
+    with config_path.open("r", encoding="utf-8") as handle:
+        payload = json.load(handle)
+
+    pokemon_payload = payload.get("pokemon")
+    if pokemon_payload is None:
+        raise ValueError("Configuration must include a 'pokemon' section.")
+    assets_payload = payload.get("assets")
+    if assets_payload is None:
+        raise ValueError("Configuration must include an 'assets' section.")
+
+    pokemon = PokemonData.from_dict(pokemon_payload)
+    assets = AssetBundle.from_dict(assets_payload)
+
+    summary_path = summary_output
+    if summary_path is None:
+        summary_raw = payload.get("summary_output")
+        if summary_raw:
+            summary_path = Path(str(summary_raw))
+
+    generate_pokemon_assets(pokemon, assets, logger=lambda message: print(message, flush=True))
+
+    if summary_path is not None:
+        summary_path.parent.mkdir(parents=True, exist_ok=True)
+        summary_content = json.dumps(pokemon.to_summary(), indent=2)
+        summary_path.write_text(summary_content + "\n", encoding="utf-8")
 
 
 @dataclass
@@ -726,23 +783,37 @@ class PokemonApp(tk.Tk):
 
     # ------------------------------------------------------------------
     def _apply_changes(self, data: PokemonData, assets: AssetBundle) -> None:
-        self.log("Enabling family macro…")
-        update_family_toggle(data.family_macro)
-        self.log("Copying graphics and validating sprites…")
-        apply_graphics(data, assets)
-        self.log("Writing JSON payloads…")
-        save_json_payloads(data)
-        self.log("Updating dex order tables…")
-        update_pokedex_orders(data)
-        self.log("Refreshing cry tables…")
-        update_cry_tables(data.family_macro, data.cry)
-        if assets.cry_sample:
-            self.log("Copying cry sample…")
-            copy_cry_sample(assets.cry_sample, data.cry)
-        self.log("Generation complete.")
+        generate_pokemon_assets(data, assets, logger=self.log)
 
 
-def main() -> None:
+def main(argv: Optional[List[str]] = None) -> None:
+    parser = argparse.ArgumentParser(description="Pokémon JSON Generator")
+    parser.add_argument(
+        "--config",
+        type=Path,
+        help="Run in headless mode using the provided JSON configuration file.",
+    )
+    parser.add_argument(
+        "--summary-output",
+        type=Path,
+        help="Optional path to write a JSON summary when using --config.",
+    )
+    args = parser.parse_args(argv)
+
+    if args.summary_output and not args.config:
+        parser.error("--summary-output requires --config")
+
+    if args.config:
+        try:
+            run_headless(args.config, args.summary_output)
+        except PillowUnavailableError as error:
+            print(f"Pillow missing: {error}", file=sys.stderr)
+            raise SystemExit(1)
+        except Exception as error:  # pragma: no cover - defensive CLI handling
+            traceback.print_exc()
+            raise SystemExit(1)
+        return
+
     app = PokemonApp()
     app.mainloop()
 
