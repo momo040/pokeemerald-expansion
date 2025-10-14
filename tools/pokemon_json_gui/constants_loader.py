@@ -5,7 +5,17 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Set, Tuple
 
-from . import project_paths
+try:
+    from . import project_paths
+except ImportError:  # pragma: no cover - executed when run as a script
+    import sys
+
+    module_path = Path(__file__).resolve().parent
+    module_dir = str(module_path)
+    if module_dir not in sys.path:
+        sys.path.insert(0, module_dir)
+
+    import project_paths  # type: ignore
 
 
 DEFINE_RE = re.compile(r"#define\s+(\w+)\s+([^/\n]+)")
