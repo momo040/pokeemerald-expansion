@@ -5,7 +5,7 @@ import re
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 from . import project_paths
 from .constants_loader import (
@@ -33,6 +33,49 @@ class AssetBundle:
     shiny_palette: Optional[Path]
     optional_assets: Dict[str, Path]
     cry_sample: Optional[Path]
+
+    @classmethod
+    def from_dict(cls, payload: Mapping[str, Any]) -> "AssetBundle":
+        def require_path(key: str) -> Path:
+            try:
+                value = payload[key]
+            except KeyError as exc:  # pragma: no cover - defensive conversion
+                raise ValueError(f"Missing asset path: {key}") from exc
+            if not isinstance(value, str):  # pragma: no cover - defensive conversion
+                raise ValueError(f"Asset path for {key} must be a string")
+            stripped = value.strip()
+            if not stripped:
+                raise ValueError(f"Asset path for {key} is empty")
+            return Path(stripped)
+
+        optional_raw = payload.get("optional_assets", {})
+        if not isinstance(optional_raw, Mapping):  # pragma: no cover - defensive conversion
+            raise ValueError("optional_assets must be a mapping")
+        optional_assets = {}
+        for name, raw_path in optional_raw.items():
+            path_str = str(raw_path).strip()
+            if not path_str:
+                continue
+            optional_assets[str(name)] = Path(path_str)
+
+        shiny = payload.get("shiny_palette")
+        cry = payload.get("cry_sample")
+
+        shiny_value = str(shiny).strip() if shiny is not None else ""
+        cry_value = str(cry).strip() if cry is not None else ""
+
+        shiny_path = Path(shiny_value) if shiny_value else None
+        cry_path = Path(cry_value) if cry_value else None
+
+        return cls(
+            front=require_path("front"),
+            back=require_path("back"),
+            icon=require_path("icon"),
+            normal_palette=require_path("normal_palette"),
+            shiny_palette=shiny_path,
+            optional_assets=optional_assets,
+            cry_sample=cry_path,
+        )
 
 
 ARRAY_RE_TEMPLATE = r"const u16 {name}\[\] =\s*\{{\n(?P<body>.*?)\n\}};"

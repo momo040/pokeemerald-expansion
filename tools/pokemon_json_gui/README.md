@@ -41,6 +41,70 @@ python3 tools/pokemon_json_gui/main.py
 If Pillow is not installed you will be prompted to add it.  The package is
 required for sprite dimension and palette validation.
 
+### Headless / Docker usage
+
+The generator can also run without a GUI, which is convenient when driving it
+from Docker or CI environments. Provide a configuration file describing the
+Pokémon data and asset locations:
+
+```bash
+python3 tools/pokemon_json_gui/main.py \
+    --config docker_config.json \
+    --summary-output build/pokemon_summary.json
+```
+
+The configuration file must define two objects:
+
+```json
+{
+  "pokemon": {
+    "species_constant": "SPECIES_EXAMPLEMON",
+    "family_macro": "P_FAMILY_EXAMPLEMON",
+    "national_dex_constant": "NATIONAL_DEX_EXAMPLEMON",
+    "display_name": "Examplemon",
+    "category_name": "Example",
+    "description": "Examplemon loves dockerized workflows.",
+    "height": 10,
+    "weight": 200,
+    "types": ["TYPE_NORMAL"],
+    "abilities": ["ABILITY_RUN_AWAY"],
+    "catch_rate": 45,
+    "exp_yield": 64,
+    "growth_rate": "GROWTH_FAST",
+    "egg_groups": ["EGG_GROUP_FIELD"],
+    "gender_ratio": "MON_GENDERLESS",
+    "egg_cycles": 20,
+    "friendship": "STANDARD_FRIENDSHIP",
+    "base_stats": {"hp": 60, "attack": 60, "defense": 60, "speed": 60, "spAttack": 60, "spDefense": 60},
+    "ev_yield": {"hp": 2},
+    "learnset_level_up": [{"level": 1, "move": "MOVE_TACKLE"}],
+    "learnset_egg": [],
+    "learnset_tm": ["MOVE_PROTECT"],
+    "evolutions": [],
+    "cry": "Cry_Pidgey",
+    "graphics_folder": "examplemon"
+  },
+  "assets": {
+    "front": "assets/front.png",
+    "back": "assets/back.png",
+    "icon": "assets/icon.png",
+    "normal_palette": "assets/normal.pal",
+    "shiny_palette": "assets/shiny.pal",
+    "optional_assets": {
+      "anim_front.png": "assets/anim_front.png"
+    },
+    "cry_sample": "assets/examplemon.aif"
+  }
+}
+```
+
+`learnset_level_up` entries require objects containing a `level` and `move`,
+while `evolutions` accept the same keys used by the GUI (`from`, `method`,
+`parameter`, `to`, and optional `conditions`).
+
+`--summary-output` writes a recap of the generated data to the specified path.
+Alternatively, the JSON configuration can include a `"summary_output"` field.
+
 ## Generated files
 
 For a species folder named `examplemon` the tool generates the following
