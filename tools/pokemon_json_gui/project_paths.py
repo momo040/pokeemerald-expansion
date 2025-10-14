@@ -14,8 +14,13 @@ NATIONAL_DEX_HEADER_PATH = REPO_ROOT / "include" / "constants" / "pokedex.h"
 MOVES_HEADER_PATH = REPO_ROOT / "include" / "constants" / "moves.h"
 ABILITIES_HEADER_PATH = REPO_ROOT / "include" / "constants" / "abilities.h"
 ITEMS_HEADER_PATH = REPO_ROOT / "include" / "constants" / "items.h"
-TYPES_HEADER_PATH = REPO_ROOT / "include" / "constants" / "pokemon_types.h"
 POKEMON_HEADER_PATH = REPO_ROOT / "include" / "constants" / "pokemon.h"
+
+_POKEMON_TYPES_HEADER_DEFAULT = REPO_ROOT / "include" / "constants" / "pokemon_types.h"
+if _POKEMON_TYPES_HEADER_DEFAULT.exists():
+    TYPES_HEADER_PATH = _POKEMON_TYPES_HEADER_DEFAULT
+else:
+    TYPES_HEADER_PATH = POKEMON_HEADER_PATH
 SPECIES_INFO_DIR = REPO_ROOT / "src" / "data" / "pokemon" / "species_info"
 
 
