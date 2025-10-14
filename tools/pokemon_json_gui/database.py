@@ -6,9 +6,21 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional, Tuple
 
-from . import project_paths
-from .data_models import PokemonData
-from .file_manager import AssetBundle
+try:
+    from . import project_paths
+    from .data_models import PokemonData
+    from .file_manager import AssetBundle
+except ImportError:  # pragma: no cover - executed when run as a script
+    import sys
+
+    module_path = Path(__file__).resolve().parent
+    module_dir = str(module_path)
+    if module_dir not in sys.path:
+        sys.path.insert(0, module_dir)
+
+    import project_paths  # type: ignore
+    from data_models import PokemonData  # type: ignore
+    from file_manager import AssetBundle  # type: ignore
 
 
 @dataclass
