@@ -18,6 +18,7 @@ if __package__:
         load_ability_constants,
         load_egg_groups,
         load_evolution_methods,
+        load_enabled_family_macros,
         load_family_macros,
         load_growth_rates,
         load_move_constants,
@@ -56,6 +57,7 @@ else:  # pragma: no cover - executed when run as a script
         load_ability_constants,
         load_egg_groups,
         load_evolution_methods,
+        load_enabled_family_macros,
         load_family_macros,
         load_growth_rates,
         load_move_constants,
@@ -224,7 +226,12 @@ class DatabaseBrowser(tk.Toplevel):
     def refresh(self) -> None:
         for item in self.tree.get_children():
             self.tree.delete(item)
-        records = self.database.list_entries()
+        enabled_families = set(load_enabled_family_macros())
+        valid_species = set(load_species_constants().keys())
+        records = self.database.list_entries(
+            enabled_families=enabled_families,
+            valid_species=valid_species,
+        )
         for record in records:
             self.tree.insert(
                 "",

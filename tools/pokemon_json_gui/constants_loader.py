@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Set, Tuple
+from typing import Dict, Iterable, List, Mapping, MutableMapping, Optional, Set, Tuple
 
 try:
     from . import project_paths
@@ -24,6 +24,7 @@ SPECIES_NAME_RE = re.compile(r"\[\s*(SPECIES_[A-Z0-9_]+)\s*][^[]+?\.speciesName\
 HEIGHT_RE = re.compile(r"\.height\s*=\s*(\d+)")
 WEIGHT_RE = re.compile(r"\.weight\s*=\s*(\d+)")
 FAMILY_MACRO_RE = re.compile(r"#define\s+(P_FAMILY_[A-Z0-9_]+)\s+")
+IDENTIFIER_RE = re.compile(r"[A-Z][A-Z0-9_]*")
 
 
 @dataclass
@@ -111,6 +112,83 @@ def load_family_macros() -> List[str]:
             if match:
                 macros.append(match.group(1))
     return macros
+
+
+def _resolve_define(
+    name: str,
+    defines: Mapping[str, str],
+    cache: MutableMapping[str, bool],
+    stack: MutableMapping[str, bool],
+) -> bool:
+    if name in ("TRUE", "FALSE"):
+        return name == "TRUE"
+    if name.isdigit():
+        return name != "0"
+    if name in cache:
+        return cache[name]
+    if name in stack:
+        # Break potential recursive loops by treating them as disabled.
+        return False
+
+    value = defines.get(name)
+    if value is None:
+        cache[name] = False
+        return False
+
+    stack[name] = True
+
+    expression = value.strip()
+    if not expression:
+        result = False
+    else:
+        python_expr = (
+            expression.replace("&&", " and ")
+            .replace("||", " or ")
+            .replace("!", " not ")
+        )
+
+        def replace_identifier(match: re.Match[str]) -> str:
+            token = match.group(0)
+            return "True" if _resolve_define(token, defines, cache, stack) else "False"
+
+        python_expr = IDENTIFIER_RE.sub(replace_identifier, python_expr)
+        python_expr = python_expr.replace("TRUE", "True").replace("FALSE", "False")
+
+        try:
+            result = bool(eval(python_expr, {}, {}))
+        except Exception:
+            tokens = IDENTIFIER_RE.findall(expression)
+            if not tokens:
+                result = False
+            elif len(tokens) == 1:
+                result = _resolve_define(tokens[0], defines, cache, stack)
+            else:
+                result = all(_resolve_define(token, defines, cache, stack) for token in tokens)
+
+    cache[name] = result
+    stack.pop(name, None)
+    return result
+
+
+def load_enabled_family_macros() -> List[str]:
+    defines: Dict[str, str] = {}
+    with project_paths.SPECIES_ENABLED_PATH.open("r", encoding="utf-8") as handle:
+        for line in handle:
+            match = DEFINE_RE.match(line)
+            if not match:
+                continue
+            name, value = match.groups()
+            defines[name] = value.strip()
+
+    cache: Dict[str, bool] = {}
+    stack: Dict[str, bool] = {}
+    enabled: List[str] = []
+    for name in defines:
+        if not name.startswith("P_FAMILY_"):
+            continue
+        if _resolve_define(name, defines, cache, stack):
+            enabled.append(name)
+    return enabled
 
 
 def load_species_metadata() -> Dict[str, SpeciesMetadata]:
