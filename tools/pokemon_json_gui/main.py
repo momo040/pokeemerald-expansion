@@ -6,7 +6,7 @@ import sys
 import traceback
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Dict, List, Optional
+from typing import Callable, Dict, List, Optional, Tuple
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
@@ -30,6 +30,7 @@ if __package__:
         showdown_folder_from_species,
     )
     from .data_models import EvolutionEntry, LearnsetEntry, PokemonData
+    from .database import PokemonDatabase, PokemonRecord
     from .file_manager import (
         AssetBundle,
         apply_graphics,
@@ -67,6 +68,7 @@ else:  # pragma: no cover - executed when run as a script
         showdown_folder_from_species,
     )
     from data_models import EvolutionEntry, LearnsetEntry, PokemonData  # type: ignore
+    from database import PokemonDatabase, PokemonRecord  # type: ignore
     from file_manager import (  # type: ignore
         AssetBundle,
         apply_graphics,
@@ -121,7 +123,12 @@ def generate_pokemon_assets(
     log("Generation complete.")
 
 
-def run_headless(config_path: Path, summary_output: Optional[Path]) -> None:
+def run_headless(
+    config_path: Path,
+    summary_output: Optional[Path],
+    database_path: Optional[Path],
+    store_in_database: bool,
+) -> None:
     with config_path.open("r", encoding="utf-8") as handle:
         payload = json.load(handle)
 
@@ -142,6 +149,11 @@ def run_headless(config_path: Path, summary_output: Optional[Path]) -> None:
             summary_path = Path(str(summary_raw))
 
     generate_pokemon_assets(pokemon, assets, logger=lambda message: print(message, flush=True))
+
+    if store_in_database:
+        database = PokemonDatabase(database_path)
+        database.save_entry(pokemon, assets)
+        print(f"Stored {pokemon.species_constant} in database.", flush=True)
 
     if summary_path is not None:
         summary_path.parent.mkdir(parents=True, exist_ok=True)
@@ -165,14 +177,123 @@ class LearnsetState:
         return [f"Lv {entry.level}: {entry.move}" for entry in self.entries]
 
 
+class DatabaseBrowser(tk.Toplevel):
+    def __init__(
+        self,
+        master: tk.Widget,
+        database: PokemonDatabase,
+        load_callback: Callable[[str], None],
+        apply_callback: Callable[[str], None],
+    ) -> None:
+        super().__init__(master)
+        self.database = database
+        self.load_callback = load_callback
+        self.apply_callback = apply_callback
+        self.title("Stored Pokémon")
+        self.geometry("560x380")
+        self.transient(master)
+        self.columnconfigure(0, weight=1)
+        self.rowconfigure(0, weight=1)
+
+        columns = ("species", "display", "updated")
+        self.tree = ttk.Treeview(self, columns=columns, show="headings", selectmode="browse")
+        self.tree.heading("species", text="Species")
+        self.tree.heading("display", text="Display Name")
+        self.tree.heading("updated", text="Updated")
+        self.tree.column("species", width=160, anchor="w")
+        self.tree.column("display", width=200, anchor="w")
+        self.tree.column("updated", width=160, anchor="w")
+        self.tree.grid(row=0, column=0, columnspan=4, sticky="nsew")
+        scrollbar = ttk.Scrollbar(self, orient="vertical", command=self.tree.yview)
+        scrollbar.grid(row=0, column=4, sticky="ns")
+        self.tree.configure(yscrollcommand=scrollbar.set)
+        self.tree.bind("<Double-1>", self._on_double_click)
+
+        button_frame = ttk.Frame(self, padding=(0, 8, 0, 0))
+        button_frame.grid(row=1, column=0, columnspan=5, sticky="ew")
+        button_frame.columnconfigure(0, weight=1)
+        ttk.Button(button_frame, text="Refresh", command=self.refresh).grid(row=0, column=0, sticky="w")
+        ttk.Button(button_frame, text="Load into Form", command=self._load_selected).grid(row=0, column=1, sticky="e", padx=(8, 0))
+        ttk.Button(button_frame, text="Apply to Project", command=self._apply_selected).grid(row=0, column=2, sticky="e", padx=(8, 0))
+        ttk.Button(button_frame, text="Close", command=self.destroy).grid(row=0, column=3, sticky="e", padx=(8, 0))
+
+        self.grab_set()
+        self.refresh()
+
+    # ------------------------------------------------------------------
+    def refresh(self) -> None:
+        for item in self.tree.get_children():
+            self.tree.delete(item)
+        records = self.database.list_entries()
+        for record in records:
+            self.tree.insert(
+                "",
+                tk.END,
+                values=(record.species_constant, record.display_name, record.updated_at),
+            )
+        if records:
+            first = self.tree.get_children()[0]
+            self.tree.selection_set(first)
+
+    # ------------------------------------------------------------------
+    def _selected_species(self) -> Optional[str]:
+        selection = self.tree.selection()
+        if not selection:
+            return None
+        values = self.tree.item(selection[0], "values")
+        return values[0] if values else None
+
+    # ------------------------------------------------------------------
+    def _load_selected(self) -> None:
+        species = self._selected_species()
+        if not species:
+            messagebox.showwarning("Database", "Select a Pokémon entry first.")
+            return
+        try:
+            self.load_callback(species)
+            self.destroy()
+        except Exception as error:  # pragma: no cover - defensive UI handling
+            messagebox.showerror("Load failed", str(error))
+
+    # ------------------------------------------------------------------
+    def _apply_selected(self) -> None:
+        species = self._selected_species()
+        if not species:
+            messagebox.showwarning("Database", "Select a Pokémon entry first.")
+            return
+        try:
+            self.apply_callback(species)
+        except Exception as error:  # pragma: no cover - defensive UI handling
+            messagebox.showerror("Apply failed", str(error))
+
+    # ------------------------------------------------------------------
+    def _on_double_click(self, _event=None) -> None:
+        self._load_selected()
+
+
 class PokemonApp(tk.Tk):
-    def __init__(self) -> None:
+    def __init__(self, database_path: Optional[Path] = None) -> None:
         super().__init__()
         self.title("Pokémon JSON Generator")
         self.minsize(1024, 720)
         project_paths.ensure_directories()
+        self._database_error: Optional[Exception] = None
+        try:
+            self.database = PokemonDatabase(database_path)
+        except Exception as error:  # pragma: no cover - defensive initialization
+            self.database = None
+            self._database_error = error
+        self._database_browser: Optional["DatabaseBrowser"] = None
         self._load_constants()
         self._build_ui()
+        if self.database is None and self._database_error is not None:
+            self.after(
+                200,
+                lambda: messagebox.showwarning(
+                    "Database unavailable",
+                    f"Unable to initialize Pokémon database: {self._database_error}",
+                ),
+            )
 
     # ------------------------------------------------------------------
     # constant loading
@@ -207,9 +328,159 @@ class PokemonApp(tk.Tk):
 
         footer = ttk.Frame(self)
         footer.grid(row=1, column=0, sticky="ew", padx=8, pady=8)
-        footer.columnconfigure(0, weight=1)
+        footer.columnconfigure(2, weight=1)
+        self.save_button = ttk.Button(footer, text="Save to Database", command=self.save_to_database)
+        self.save_button.grid(row=0, column=0, sticky="w")
+        self.database_button = ttk.Button(footer, text="Open Database…", command=self.open_database_browser)
+        self.database_button.grid(row=0, column=1, sticky="w", padx=(8, 0))
         self.generate_button = ttk.Button(footer, text="Generate JSON and Assets", command=self.generate)
-        self.generate_button.grid(row=0, column=1, sticky="e")
+        self.generate_button.grid(row=0, column=2, sticky="e")
+        if self.database is None:
+            self.save_button.state(["disabled"])
+            self.database_button.state(["disabled"])
+
+    # ------------------------------------------------------------------
+    def _populate_from_pokemon(self, data: PokemonData) -> None:
+        self.species_var.set(data.species_constant)
+        self.natdex_var.set(data.national_dex_constant)
+        self.family_macro_var.set(data.family_macro)
+        self.display_name_var.set(data.display_name)
+        self.category_var.set(data.category_name)
+        self.cry_var.set(data.cry)
+
+        for stat, var in self.base_stat_vars.items():
+            var.set(str(data.base_stats.get(stat, 0)))
+        for stat, var in self.ev_vars.items():
+            var.set(str(data.ev_yield.get(stat, 0)))
+
+        types = list(data.types)
+        self.type1_var.set(types[0] if types else "")
+        self.type2_var.set(types[1] if len(types) > 1 else (types[0] if len(types) == 1 and types[0] == "TYPE_NONE" else "TYPE_NONE"))
+
+        abilities = list(data.abilities)
+        self.ability1_var.set(abilities[0] if abilities else "ABILITY_NONE")
+        self.ability2_var.set(abilities[1] if len(abilities) > 1 else "ABILITY_NONE")
+        self.ability3_var.set(abilities[2] if len(abilities) > 2 else "ABILITY_NONE")
+
+        egg_groups = list(data.egg_groups)
+        self.egg_group1_var.set(egg_groups[0] if egg_groups else "EGG_GROUP_NONE")
+        self.egg_group2_var.set(egg_groups[1] if len(egg_groups) > 1 else "EGG_GROUP_NONE")
+
+        self.catch_rate_var.set(str(data.catch_rate))
+        self.exp_yield_var.set(str(data.exp_yield))
+        self.growth_var.set(data.growth_rate)
+        self.gender_ratio_var.set(data.gender_ratio)
+        self.egg_cycles_var.set(str(data.egg_cycles))
+        self.friendship_var.set(data.friendship)
+        self.icon_palette_var.set(str(data.icon_pal_index) if data.icon_pal_index is not None else "")
+
+        self.level_moves_state.entries = [LearnsetEntry(entry.level, entry.move) for entry in data.learnset_level_up]
+        self._refresh_level_moves()
+        self.egg_moves = sorted(data.learnset_egg)
+        self._refresh_egg_moves()
+        self.tm_moves = sorted(data.learnset_tm)
+        self._refresh_tm_moves()
+        self.evolutions = [
+            EvolutionEntry(
+                from_species=entry.from_species,
+                method=entry.method,
+                parameter=entry.parameter,
+                target_species=entry.target_species,
+                conditions=list(entry.conditions),
+            )
+            for entry in data.evolutions
+        ]
+        self._refresh_evolutions()
+
+        self.height_var.set(str(data.height))
+        self.weight_var.set(str(data.weight))
+        self.graphics_folder_var.set(data.graphics_folder)
+        self.description_text.delete("1.0", tk.END)
+        self.description_text.insert(tk.END, data.description)
+
+    # ------------------------------------------------------------------
+    def _populate_assets(self, assets: AssetBundle) -> None:
+        self.asset_vars.setdefault("front", tk.StringVar())
+        self.asset_vars.setdefault("back", tk.StringVar())
+        self.asset_vars.setdefault("icon", tk.StringVar())
+        self.asset_vars.setdefault("normal_palette", tk.StringVar())
+        self.asset_vars["front"].set(str(assets.front))
+        self.asset_vars["back"].set(str(assets.back))
+        self.asset_vars["icon"].set(str(assets.icon))
+        self.asset_vars["normal_palette"].set(str(assets.normal_palette))
+        for _label, (key, _) in OPTIONAL_ASSETS.items():
+            var = self.asset_vars.setdefault(key, tk.StringVar())
+            if key == "shiny_palette":
+                var.set(str(assets.shiny_palette) if assets.shiny_palette else "")
+            elif key == "cry_sample":
+                var.set(str(assets.cry_sample) if assets.cry_sample else "")
+            else:
+                path = assets.optional_assets.get(key)
+                var.set(str(path) if path else "")
+
+    # ------------------------------------------------------------------
+    def save_to_database(self) -> None:
+        if self.database is None:
+            messagebox.showerror("Database unavailable", "The Pokémon database could not be initialized.")
+            return
+        try:
+            data = self._collect_data()
+            assets = self._build_asset_bundle()
+            self.database.save_entry(data, assets)
+            self.log(f"Saved {data.species_constant} to database.")
+            messagebox.showinfo("Database", f"{data.display_name} stored successfully.")
+        except PillowUnavailableError as error:
+            messagebox.showerror("Pillow missing", str(error))
+        except Exception as error:  # pragma: no cover - defensive UI handling
+            traceback.print_exc()
+            messagebox.showerror("Save failed", str(error))
+            self.log(f"Error: {error}")
+
+    # ------------------------------------------------------------------
+    def open_database_browser(self) -> None:
+        if self.database is None:
+            messagebox.showerror("Database unavailable", "The Pokémon database could not be initialized.")
+            return
+        if self._database_browser and tk.Toplevel.winfo_exists(self._database_browser):
+            self._database_browser.lift()
+            return
+        browser = DatabaseBrowser(
+            self,
+            self.database,
+            load_callback=self._handle_database_load,
+            apply_callback=self._handle_database_apply,
+        )
+        browser.bind("<Destroy>", lambda _event: setattr(self, "_database_browser", None))
+        self._database_browser = browser
+
+    # ------------------------------------------------------------------
+    def _handle_database_load(self, species: str) -> None:
+        pokemon, assets = self._load_pokemon_from_database(species)
+        self._populate_from_pokemon(pokemon)
+        self._populate_assets(assets)
+        self.log(f"Loaded {species} from database.")
+        messagebox.showinfo("Database", f"{pokemon.display_name} loaded into the editor.")
+
+    # ------------------------------------------------------------------
+    def _handle_database_apply(self, species: str) -> None:
+        pokemon, assets = self._load_pokemon_from_database(species)
+        self.log(f"Applying {species} from database…")
+        try:
+            generate_pokemon_assets(pokemon, assets, logger=self.log)
+        except Exception as error:
+            self.log(f"Error applying {species}: {error}")
+            raise
+        messagebox.showinfo("Database", f"{pokemon.display_name} applied to the project.")
+
+    # ------------------------------------------------------------------
+    def _load_pokemon_from_database(self, species: str) -> Tuple[PokemonData, AssetBundle]:
+        if self.database is None:
+            raise RuntimeError("Database unavailable")
+        try:
+            return self.database.load_entry(species)
+        except KeyError as error:
+            message = error.args[0] if error.args else str(error)
+            raise ValueError(message) from error
 
     # ------------------------------------------------------------------
     def _build_species_tab(self, notebook: ttk.Notebook) -> None:
@@ -798,14 +1069,26 @@ def main(argv: Optional[List[str]] = None) -> None:
         type=Path,
         help="Optional path to write a JSON summary when using --config.",
     )
+    parser.add_argument(
+        "--database-path",
+        type=Path,
+        help="Optional path to the SQLite database used for stored Pokémon entries.",
+    )
+    parser.add_argument(
+        "--store-database",
+        action="store_true",
+        help="When used with --config, store the generated Pokémon in the database.",
+    )
     args = parser.parse_args(argv)
 
     if args.summary_output and not args.config:
         parser.error("--summary-output requires --config")
+    if args.store_database and not args.config:
+        parser.error("--store-database requires --config")
 
     if args.config:
         try:
-            run_headless(args.config, args.summary_output)
+            run_headless(args.config, args.summary_output, args.database_path, args.store_database)
         except PillowUnavailableError as error:
             print(f"Pillow missing: {error}", file=sys.stderr)
             raise SystemExit(1)
@@ -814,7 +1097,7 @@ def main(argv: Optional[List[str]] = None) -> None:
             raise SystemExit(1)
         return
 
-    app = PokemonApp()
+    app = PokemonApp(database_path=args.database_path)
     app.mainloop()
 
 

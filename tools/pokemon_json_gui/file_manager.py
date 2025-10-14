@@ -77,6 +77,20 @@ class AssetBundle:
             cry_sample=cry_path,
         )
 
+    def to_dict(self) -> Dict[str, Any]:
+        payload: Dict[str, Any] = {
+            "front": str(self.front),
+            "back": str(self.back),
+            "icon": str(self.icon),
+            "normal_palette": str(self.normal_palette),
+            "optional_assets": {name: str(path) for name, path in self.optional_assets.items()},
+        }
+        if self.shiny_palette is not None:
+            payload["shiny_palette"] = str(self.shiny_palette)
+        if self.cry_sample is not None:
+            payload["cry_sample"] = str(self.cry_sample)
+        return payload
+
 
 ARRAY_RE_TEMPLATE = r"const u16 {name}\[\] =\s*\{{\n(?P<body>.*?)\n\}};"
 FAMILY_BLOCK_TEMPLATE = r"\.if\s+{macro}\s*==\s*TRUE\s*\n(?P<body>.*?)\n\.endif @ {macro}"

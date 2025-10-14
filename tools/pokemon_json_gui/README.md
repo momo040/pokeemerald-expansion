@@ -105,6 +105,21 @@ while `evolutions` accept the same keys used by the GUI (`from`, `method`,
 `--summary-output` writes a recap of the generated data to the specified path.
 Alternatively, the JSON configuration can include a `"summary_output"` field.
 
+### Database integration
+
+The GUI now includes database-aware workflows so that created Pokémon can be
+reused later or automatically applied to the repository:
+
+* **Save to Database** stores the current configuration (including asset file
+  paths) inside `build/pokemon_json_gui/pokemon.db` by default.
+* **Open Database…** opens a browser listing the stored entries.  From there you
+  can load a Pokémon back into the editor or apply it directly to the project,
+  which runs the same generation pipeline used by the main "Generate" button.
+
+Headless runs can participate in the same database by providing the
+`--store-database` flag.  Both GUI and CLI modes accept `--database-path` when
+you wish to override the default SQLite file location.
+
 ## Generated files
 
 For a species folder named `examplemon` the tool generates the following
