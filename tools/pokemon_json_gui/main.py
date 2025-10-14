@@ -7,35 +7,73 @@ from typing import Dict, List
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
-from . import project_paths
-from .audio_utils import load_available_cries
-from .constants_loader import (
-    ensure_constant_exists,
-    load_ability_constants,
-    load_egg_groups,
-    load_evolution_methods,
-    load_family_macros,
-    load_growth_rates,
-    load_move_constants,
-    load_national_dex_constants,
-    load_species_constants,
-    load_species_metadata,
-    load_type_constants,
-    normalize_natdex_constant,
-    normalize_species_constant,
-    showdown_folder_from_species,
-)
-from .data_models import EvolutionEntry, LearnsetEntry, PokemonData
-from .file_manager import (
-    AssetBundle,
-    apply_graphics,
-    copy_cry_sample,
-    save_json_payloads,
-    update_cry_tables,
-    update_family_toggle,
-    update_pokedex_orders,
-)
-from .image_utils import PillowUnavailableError
+if __package__:
+    from . import project_paths
+    from .audio_utils import load_available_cries
+    from .constants_loader import (
+        ensure_constant_exists,
+        load_ability_constants,
+        load_egg_groups,
+        load_evolution_methods,
+        load_family_macros,
+        load_growth_rates,
+        load_move_constants,
+        load_national_dex_constants,
+        load_species_constants,
+        load_species_metadata,
+        load_type_constants,
+        normalize_natdex_constant,
+        normalize_species_constant,
+        showdown_folder_from_species,
+    )
+    from .data_models import EvolutionEntry, LearnsetEntry, PokemonData
+    from .file_manager import (
+        AssetBundle,
+        apply_graphics,
+        copy_cry_sample,
+        save_json_payloads,
+        update_cry_tables,
+        update_family_toggle,
+        update_pokedex_orders,
+    )
+    from .image_utils import PillowUnavailableError
+else:  # pragma: no cover - executed when run as a script
+    import os
+    import sys
+
+    module_path = os.path.dirname(os.path.abspath(__file__))
+    if module_path not in sys.path:
+        sys.path.insert(0, module_path)
+
+    import project_paths  # type: ignore
+    from audio_utils import load_available_cries  # type: ignore
+    from constants_loader import (  # type: ignore
+        ensure_constant_exists,
+        load_ability_constants,
+        load_egg_groups,
+        load_evolution_methods,
+        load_family_macros,
+        load_growth_rates,
+        load_move_constants,
+        load_national_dex_constants,
+        load_species_constants,
+        load_species_metadata,
+        load_type_constants,
+        normalize_natdex_constant,
+        normalize_species_constant,
+        showdown_folder_from_species,
+    )
+    from data_models import EvolutionEntry, LearnsetEntry, PokemonData  # type: ignore
+    from file_manager import (  # type: ignore
+        AssetBundle,
+        apply_graphics,
+        copy_cry_sample,
+        save_json_payloads,
+        update_cry_tables,
+        update_family_toggle,
+        update_pokedex_orders,
+    )
+    from image_utils import PillowUnavailableError  # type: ignore
 
 
 REQUIRED_ASSETS = {
