@@ -7,14 +7,31 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
-from . import project_paths
-from .constants_loader import (
-    SpeciesMetadata,
-    load_species_metadata,
-    showdown_folder_from_species,
-)
-from .data_models import PokemonData
-from .image_utils import ensure_shiny_palette, validate_palette, validate_png
+try:
+    from . import project_paths
+    from .constants_loader import (
+        SpeciesMetadata,
+        load_species_metadata,
+        showdown_folder_from_species,
+    )
+    from .data_models import PokemonData
+    from .image_utils import ensure_shiny_palette, validate_palette, validate_png
+except ImportError:  # pragma: no cover - executed when run as a script
+    import sys
+
+    module_path = Path(__file__).resolve().parent
+    module_dir = str(module_path)
+    if module_dir not in sys.path:
+        sys.path.insert(0, module_dir)
+
+    import project_paths  # type: ignore
+    from constants_loader import (  # type: ignore
+        SpeciesMetadata,
+        load_species_metadata,
+        showdown_folder_from_species,
+    )
+    from data_models import PokemonData  # type: ignore
+    from image_utils import ensure_shiny_palette, validate_palette, validate_png  # type: ignore
 
 OPTIONAL_SIZE_HINTS = {
     "anim_front.png": (64, 64),
